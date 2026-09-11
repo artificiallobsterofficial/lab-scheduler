@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import type { AppData, MonthDoc } from '../domain/types'
+import type { AppData, LabConfig, MonthDoc } from '../domain/types'
 import { cellKey } from '../domain/types'
 import { monthDays } from '../domain/calendar'
 import { techsOfLab } from '../domain/problem'
@@ -8,6 +8,7 @@ export type PaintMode = 'select' | 'PTO' | 'UNAVAIL' | 'OFF' | 'ON' | 'erase'
 
 interface Props {
   data: AppData
+  labs: LabConfig[]
   doc: MonthDoc
   derived: Record<string, string>
   hardKeys: Set<string>
@@ -16,7 +17,7 @@ interface Props {
   onCellClick: (techId: string, date: string) => void
 }
 
-export function ScheduleGrid({ data, doc, derived, hardKeys, selected, paint, onCellClick }: Props) {
+export function ScheduleGrid({ data, labs, doc, derived, hardKeys, selected, paint, onCellClick }: Props) {
   const days = useMemo(() => monthDays(doc.month, data.holidays), [doc.month, data.holidays])
   const inputAt = useMemo(() => {
     const m: Record<string, { fixed?: 'PTO' | 'UNAVAIL'; req?: 'OFF' | 'ON' }> = {}
@@ -36,7 +37,7 @@ export function ScheduleGrid({ data, doc, derived, hardKeys, selected, paint, on
           </tr>
         </thead>
         <tbody>
-          {data.labs.map(lab => {
+          {labs.map(lab => {
             const techs = techsOfLab(data, lab.id)
             const roleCode = new Map(lab.roles.map(r => [r.id, r.code]))
             const open = new Set(lab.workdays)
@@ -76,8 +77,8 @@ export function ScheduleGrid({ data, doc, derived, hardKeys, selected, paint, on
         <span><i style={{ background: 'var(--cell-pto)' }} />PTO</span>
         <span><i style={{ background: 'var(--cell-unavail)' }} />X unavailable</span>
         <span>○ asked off · ● asked on · dot = locked · red border = rule broken</span>
-        {data.labs.map(l => l.roles.filter(r => r.enabled).map(r => <span key={l.id + r.id}><b>{r.code}</b> {r.label}{data.labs.length > 1 ? ` (${l.name})` : ''}</span>))}
-        {data.labs.filter(l => l.fridayRoleBecomesWeekendCall.enabled).map(l => <span key={l.id + 'd'}><b>{l.fridayRoleBecomesWeekendCall.code}</b> {l.fridayRoleBecomesWeekendCall.label} (from Friday {l.roles.find(r => r.id === l.fridayRoleBecomesWeekendCall.roleId)?.code})</span>)}
+        {labs.map(l => l.roles.filter(r => r.enabled).map(r => <span key={l.id + r.id}><b>{r.code}</b> {r.label}{labs.length > 1 ? ` (${l.name})` : ''}</span>))}
+        {labs.filter(l => l.fridayRoleBecomesWeekendCall.enabled).map(l => <span key={l.id + 'd'}><b>{l.fridayRoleBecomesWeekendCall.code}</b> {l.fridayRoleBecomesWeekendCall.label} (from Friday {l.roles.find(r => r.id === l.fridayRoleBecomesWeekendCall.roleId)?.code})</span>)}
       </div>
     </div>
   )

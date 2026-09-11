@@ -26,6 +26,8 @@ h3 { font-size: 13px; margin: 12px 0 6px; color: var(--muted); text-transform: u
 .tabs { display: flex; gap: 4px; }
 .tabs button { border: none; background: transparent; padding: 8px 12px; border-radius: 6px; }
 .tabs button.active { background: #e8eefc; color: var(--accent); }
+.labtabs { margin-bottom: 10px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.labtabs button { font-weight: 600; }
 .page { padding: 16px 20px 60px; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }

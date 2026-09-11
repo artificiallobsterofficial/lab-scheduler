@@ -15,6 +15,10 @@ const ITER_OPTIONS = [{ label: 'Quick', n: 10000 }, { label: 'Normal', n: 40000 
 export function MonthTab({ data, setData, month, setMonth }: { data: AppData; setData: SetData; month: string; setMonth: (m: string) => void }) {
   const doc = getMonthDoc(data, month)
   const committed = doc.status === 'committed'
+  const [labFilter, setLabFilter] = useState<string>(data.labs[0]?.id ?? 'all')
+  const shownLabs = useMemo(() => labFilter === 'all' ? data.labs : data.labs.filter(l => l.id === labFilter), [data.labs, labFilter])
+  const shownIds = useMemo(() => new Set(shownLabs.map(l => l.id)), [shownLabs])
+  const shownTechIds = useMemo(() => new Set(data.techs.filter(t => shownIds.has(t.labId)).map(t => t.id)), [data.techs, shownIds])
   const [paint, setPaint] = useState<PaintMode>('select')
   const [selected, setSelected] = useState<{ techId: string; date: string } | null>(null)
   const [iters, setIters] = useState(40000)
@@ -25,9 +29,10 @@ export function MonthTab({ data, setData, month, setMonth }: { data: AppData; se
 
   const evals = useMemo(() => data.labs.map(lab => ({ lab, ...evaluateLab(data, lab, doc) })), [data, doc])
   const derived = useMemo(() => Object.assign({}, ...data.labs.map(lab => derivedMarkers(data, lab, doc))) as Record<string, string>, [data, doc])
-  const warnings: Warning[] = useMemo(() => evals.flatMap(e => e.evaluation.warnings).sort((a, b) => (b.hard ? 1 : 0) - (a.hard ? 1 : 0) || (a.date ?? '').localeCompare(b.date ?? '')), [evals])
+  const shownEvals = useMemo(() => evals.filter(e => shownIds.has(e.lab.id)), [evals, shownIds])
+  const warnings: Warning[] = useMemo(() => shownEvals.flatMap(e => e.evaluation.warnings).sort((a, b) => (b.hard ? 1 : 0) - (a.hard ? 1 : 0) || (a.date ?? '').localeCompare(b.date ?? '')), [shownEvals])
   const hardKeys = useMemo(() => new Set(warnings.filter(w => w.hard && w.techId && w.date).map(w => cellKey(w.techId!, w.date!))), [warnings])
-  const hasCells = Object.keys(doc.cells).length > 0
+  const hasCells = Object.keys(doc.cells).some(k => shownTechIds.has(k.split('|')[0]))
 
   const updateDoc = (fn: (m: MonthDoc) => MonthDoc) => setData(d => ({ ...d, months: { ...d.months, [month]: fn(getMonthDoc(d, month)) } }))
 
@@ -44,15 +49,16 @@ export function MonthTab({ data, setData, month, setMonth }: { data: AppData; se
       if (m.type === 'done') { updateDoc(d => ({ ...d, cells: m.cells })); setRunning(false); w.terminate(); workerRef.current = null }
     }
     w.onerror = err => { console.error('solver worker error', err); setError('Solver failed: ' + (err.message || 'see browser console')); setRunning(false); w.terminate(); workerRef.current = null }
-    w.postMessage({ type: 'solve', data, month: doc, iterations: iters })
+    w.postMessage({ type: 'solve', data, month: doc, iterations: iters, labIds: labFilter === 'all' ? undefined : [labFilter] })
   }
   const cancel = () => { workerRef.current?.terminate(); workerRef.current = null; setRunning(false) }
 
   const clearUnlocked = () => {
-    if (!confirm('Clear every unlocked cell? Locked cells and PTO/requests stay.')) return
-    updateDoc(d => ({ ...d, cells: Object.fromEntries(Object.entries(d.cells).filter(([, c]) => c.locked)) }))
+    const scope = labFilter === 'all' ? 'every lab' : shownLabs[0]?.name
+    if (!confirm(`Clear every unlocked cell in ${scope}? Locked cells and PTO/requests stay.`)) return
+    updateDoc(d => ({ ...d, cells: Object.fromEntries(Object.entries(d.cells).filter(([k, c]) => c.locked || !shownTechIds.has(k.split('|')[0]))) }))
   }
-  const unlockAll = () => updateDoc(d => ({ ...d, cells: Object.fromEntries(Object.entries(d.cells).map(([k, c]) => [k, { ...c, locked: false }])) }))
+  const unlockAll = () => updateDoc(d => ({ ...d, cells: Object.fromEntries(Object.entries(d.cells).map(([k, c]) => [k, shownTechIds.has(k.split('|')[0]) ? { ...c, locked: false } : c])) }))
 
   const onCellClick = (techId: string, date: string) => {
     if (committed) return
@@ -86,6 +92,10 @@ export function MonthTab({ data, setData, month, setMonth }: { data: AppData; se
   return (
     <div>
       <div className="panel">
+        <div className="tabs labtabs">
+          {data.labs.map(l => <button key={l.id} className={labFilter === l.id ? 'active' : ''} onClick={() => { setLabFilter(l.id); setSelected(null) }} disabled={running}>{l.name}</button>)}
+          <button className={labFilter === 'all' ? 'active' : ''} onClick={() => { setLabFilter('all'); setSelected(null) }} disabled={running}>All labs</button>
+        </div>
         <div className="toolbar">
           <button className="small" onClick={() => setMonth(prevMonth(month))}>‹</button>
           <input type="month" value={month} onChange={e => e.target.value && setMonth(e.target.value)} />
@@ -98,7 +108,7 @@ export function MonthTab({ data, setData, month, setMonth }: { data: AppData; se
             {ITER_OPTIONS.map(o => <option key={o.n} value={o.n}>{o.label} ({o.n / 1000}k)</option>)}
           </select>
           {!running
-            ? <button className="primary" onClick={generate} disabled={committed}>{hasCells ? 'Re-generate (keeps locked cells)' : 'Generate schedule'}</button>
+            ? <button className="primary" onClick={generate} disabled={committed}>{hasCells ? 'Re-generate' : 'Generate'} {labFilter === 'all' ? 'all labs' : shownLabs[0]?.name}{hasCells ? ' (keeps locked cells)' : ''}</button>
             : <button onClick={cancel}>Cancel</button>}
           <button className="small" onClick={clearUnlocked} disabled={!hasCells || committed}>Clear unlocked</button>
           <button className="small" onClick={unlockAll} disabled={!hasCells || committed}>Unlock all</button>
@@ -106,7 +116,7 @@ export function MonthTab({ data, setData, month, setMonth }: { data: AppData; se
         {error && <p className="note" style={{ color: 'var(--bad)' }}>{error}</p>}
         {running && (
           <div>
-            {data.labs.map(l => <div key={l.id} className="note">{l.name} <div className="progress"><div style={{ width: `${Math.min(100, ((progress[l.id] ?? 0) / iters) * 100)}%` }} /></div></div>)}
+            {shownLabs.map(l => <div key={l.id} className="note">{l.name} <div className="progress"><div style={{ width: `${Math.min(100, ((progress[l.id] ?? 0) / iters) * 100)}%` }} /></div></div>)}
           </div>
         )}
         <div className="toolbar" style={{ marginTop: 8 }}>
@@ -121,9 +131,9 @@ export function MonthTab({ data, setData, month, setMonth }: { data: AppData; se
       <div className="grid-2">
         <div>
           <div className="panel">
-            <ScheduleGrid data={data} doc={doc} derived={derived} hardKeys={hardKeys} selected={selected} paint={committed ? 'select' : paint} onCellClick={onCellClick} />
+            <ScheduleGrid data={data} labs={shownLabs} doc={doc} derived={derived} hardKeys={hardKeys} selected={selected} paint={committed ? 'select' : paint} onCellClick={onCellClick} />
           </div>
-          {data.labs.map(lab => <FairnessTable key={lab.id} data={data} lab={lab} doc={doc} />)}
+          {shownLabs.map(lab => <FairnessTable key={lab.id} data={data} lab={lab} doc={doc} />)}
         </div>
         <div>
           {selected && selectedLab && selectedEval && !committed && (
@@ -131,7 +141,7 @@ export function MonthTab({ data, setData, month, setMonth }: { data: AppData; se
           )}
           <div className="panel">
             <h3>Score</h3>
-            {evals.map(e => (
+            {shownEvals.map(e => (
               <div key={e.lab.id} className="row" style={{ justifyContent: 'space-between' }}>
                 <span>{e.lab.name}</span>
                 <span>
@@ -146,7 +156,7 @@ export function MonthTab({ data, setData, month, setMonth }: { data: AppData; se
             <h3>Warnings ({warnings.length})</h3>
             {hasCells ? (
               <ul className="warnlist">
-                {warnings.slice(0, 200).map((w, i) => <li key={i} className={w.hard ? 'hard' : ''}><span className="d">{w.date?.slice(5) ?? ''}</span>{data.labs.length > 1 && <span className="d">{data.labs.find(l => l.id === w.labId)?.name}</span>}{w.msg}</li>)}
+                {warnings.slice(0, 200).map((w, i) => <li key={i} className={w.hard ? 'hard' : ''}><span className="d">{w.date?.slice(5) ?? ''}</span>{shownLabs.length > 1 && <span className="d">{data.labs.find(l => l.id === w.labId)?.name}</span>}{w.msg}</li>)}
                 {!warnings.length && <li className="muted">None. Every slot is filled and no rule is broken.</li>}
               </ul>
             ) : <p className="note">Generate a schedule to see warnings.</p>}
